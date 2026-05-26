@@ -1,177 +1,312 @@
 from __future__ import annotations
 
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import pandas as pd
 
 
-COLOR_SCALE = ["#1f4e79", "#2e7d8a", "#f29f05", "#d1495b"]
+COLOR_SCALE = ["#0f766e", "#17436a", "#d18a1c", "#c44935", "#5f6b76"]
+SEVERITY_COLORS = {
+    "Leves": "#0f766e",
+    "Graves": "#d18a1c",
+    "Fatais": "#c44935",
+}
+BASE_FONT = "Bahnschrift, Aptos, Trebuchet MS, sans-serif"
+FONT_COLOR = "#e7eef5"
+GRID_COLOR = "rgba(142, 177, 204, 0.12)"
+MUTED_COLOR = "#9db1c4"
 
 
 def _empty_figure(message: str) -> go.Figure:
     fig = go.Figure()
-    fig.add_annotation(text=message, x=0.5, y=0.5, showarrow=False, font=dict(size=16, color="#64748b"))
+    fig.add_annotation(text=message, x=0.5, y=0.5, showarrow=False, font=dict(size=15, color=MUTED_COLOR))
     fig.update_xaxes(visible=False)
     fig.update_yaxes(visible=False)
-    fig.update_layout(template="plotly_white", height=340, margin=dict(l=20, r=20, t=20, b=20))
+    fig.update_layout(
+        height=320,
+        margin=dict(l=16, r=16, t=16, b=16),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family=BASE_FONT, color=FONT_COLOR),
+    )
     return fig
 
 
-def kpi_figure(value: float, label: str, suffix: str = "") -> go.Figure:
-    def _compact(n: float) -> str:
-        try:
-            n = float(n)
-        except Exception:
-            return str(n)
-        if abs(n) >= 1_000_000:
-            return f"{n/1_000_000:.1f}M"
-        if abs(n) >= 1_000:
-            return f"{n/1_000:.1f}K"
-        return f"{int(n):,}"
-
-    display = f"{value:.0f}{suffix}" if suffix == "%" else _compact(value)
-
-    fig = go.Figure()
-    fig.add_annotation(
-        text=f"<b>{display}</b><br><span style='font-size:14px'>{label}</span>",
-        x=0.5,
-        y=0.5,
-        showarrow=False,
-        font=dict(size=26, color="#0f1724"),
+def _apply_layout(fig: go.Figure, *, height: int, xaxis_title: str | None = None, yaxis_title: str | None = None) -> go.Figure:
+    fig.update_layout(
+        template="plotly_white",
+        title=None,
+        height=height,
+        margin=dict(l=16, r=16, t=12, b=16),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family=BASE_FONT, color=FONT_COLOR),
+        legend_title_text="",
+        colorway=COLOR_SCALE,
     )
-    fig.update_xaxes(visible=False)
-    fig.update_yaxes(visible=False)
-    fig.update_layout(height=160, margin=dict(l=10, r=10, t=10, b=10), paper_bgcolor="white", plot_bgcolor="white")
+    fig.update_xaxes(
+        title=xaxis_title,
+        showgrid=True,
+        gridcolor=GRID_COLOR,
+        zeroline=False,
+        showline=False,
+        automargin=True,
+        tickfont=dict(color=MUTED_COLOR),
+        title_font=dict(color=MUTED_COLOR),
+    )
+    fig.update_yaxes(
+        title=yaxis_title,
+        showgrid=True,
+        gridcolor=GRID_COLOR,
+        zeroline=False,
+        showline=False,
+        automargin=True,
+        tickfont=dict(color=MUTED_COLOR),
+        title_font=dict(color=MUTED_COLOR),
+    )
     return fig
 
 
 def monthly_line(frame: pd.DataFrame) -> go.Figure:
     if frame.empty:
         return _empty_figure("Sem registros para o filtro selecionado")
-    # ensure month_period is datetime
+
     if "month_period" in frame.columns and pd.api.types.is_datetime64_any_dtype(frame["month_period"]):
-        mp = frame.copy()
-        month_map = {1: "jan", 2: "fev", 3: "mar", 4: "abr", 5: "mai", 6: "jun", 7: "jul", 8: "ago", 9: "set", 10: "out", 11: "nov", 12: "dez"}
-        mp = mp.assign(month_label=mp["month_period"].dt.month.map(month_map) + " " + mp["month_period"].dt.year.astype(str))
-        fig = px.line(mp, x="month_period", y="accidents", markers=True, title="Evolução mensal dos acidentes")
-        fig.update_traces(line=dict(color=COLOR_SCALE[0], width=3), hovertemplate="%{x|%b %Y}: %{y:,} acidentes")
-        fig.update_layout(template="plotly_white", height=360, xaxis_title="Mês", yaxis_title="Acidentes")
-        fig.update_xaxes(tickvals=mp["month_period"].tolist(), ticktext=mp["month_label"].tolist())
+        month_names = {
+            1: "jan",
+            2: "fev",
+            3: "mar",
+            4: "abr",
+            5: "mai",
+            6: "jun",
+            7: "jul",
+            8: "ago",
+            9: "set",
+            10: "out",
+            11: "nov",
+            12: "dez",
+        }
+        month_frame = frame.copy()
+        month_frame["month_label"] = (
+            month_frame["month_period"].dt.month.map(month_names)
+            + " "
+            + month_frame["month_period"].dt.year.astype(str)
+        )
+        fig = px.line(month_frame, x="month_period", y="accidents", markers=True)
+        fig.update_traces(
+            line=dict(color="#0f766e", width=3),
+            marker=dict(size=7, color="#37a1c4"),
+            hovertemplate="%{x|%b %Y}: %{y:,} ocorrencias",
+        )
+        fig.update_xaxes(
+            tickvals=month_frame["month_period"].tolist(),
+            ticktext=month_frame["month_label"].tolist(),
+        )
     else:
-        fig = px.line(frame, x="month_period", y="accidents", markers=True, title="Evolução mensal dos acidentes")
-        fig.update_traces(line=dict(color=COLOR_SCALE[0], width=3), hovertemplate="%{x}: %{y:,} acidentes")
-        fig.update_layout(template="plotly_white", height=360, xaxis_title="Mês", yaxis_title="Acidentes")
-    return fig
+        fig = px.line(frame, x="month_period", y="accidents", markers=True)
+        fig.update_traces(
+            line=dict(color="#0f766e", width=3),
+            marker=dict(size=7, color="#37a1c4"),
+            hovertemplate="%{x}: %{y:,} ocorrencias",
+        )
+
+    return _apply_layout(fig, height=320, xaxis_title="Mes", yaxis_title="Ocorrencias")
 
 
 def state_bar(frame: pd.DataFrame) -> go.Figure:
     if frame.empty:
         return _empty_figure("Sem UFs para exibir")
+
     top = frame.head(10).copy()
     top["label"] = top["accidents"].map(lambda value: f"{int(value):,}".replace(",", "."))
-    fig = px.bar(top, x="accidents", y="state", orientation="h", title="Top 10 UFs por acidentes")
-    fig.update_traces(marker_color=COLOR_SCALE[1], text=top["label"], textposition="outside", cliponaxis=False)
-    fig.update_layout(template="plotly_white", height=420, xaxis_title="Acidentes", yaxis_title="Estado", margin=dict(l=70, r=90, t=70, b=50))
-    fig.update_xaxes(range=[0, max(top["accidents"].max() * 1.18, 1)])
+    fig = px.bar(top, x="accidents", y="state", orientation="h")
+    fig.update_traces(marker_color="#17436a", text=top["label"], textposition="outside", cliponaxis=False)
+    fig.update_xaxes(range=[0, max(top["accidents"].max() * 1.15, 1)])
     fig.update_yaxes(autorange="reversed")
-    return fig
+    return _apply_layout(fig, height=320, xaxis_title="Ocorrencias", yaxis_title="UF")
+
+
+def city_bar(frame: pd.DataFrame) -> go.Figure:
+    if frame.empty:
+        return _empty_figure("Sem cidades para exibir")
+
+    top = frame.head(10).copy()
+    top["label"] = top["accidents"].map(lambda value: f"{int(value):,}".replace(",", "."))
+    fig = px.bar(top, x="accidents", y="city_label", orientation="h")
+    fig.update_traces(marker_color="#0f766e", text=top["label"], textposition="outside", cliponaxis=False)
+    fig.update_xaxes(range=[0, max(top["accidents"].max() * 1.15, 1)])
+    fig.update_yaxes(autorange="reversed")
+    return _apply_layout(fig, height=320, xaxis_title="Ocorrencias", yaxis_title="Cidade")
 
 
 def accident_type_bar(frame: pd.DataFrame) -> go.Figure:
     if frame.empty:
         return _empty_figure("Sem causas para exibir")
-    top = frame.head(15).copy()
+
+    top = frame.head(10).copy()
     top["label"] = top["accidents"].map(lambda value: f"{int(value):,}".replace(",", "."))
-    fig = px.bar(top, x="accidents", y="accident_type", orientation="h", title="Principais causas de acidentes")
-    fig.update_traces(marker_color=COLOR_SCALE[2], text=top["label"], textposition="outside", cliponaxis=False, hovertemplate="%{x:,} acidentes<br>%{y}")
-    fig.update_layout(template="plotly_white", height=460, xaxis_title="Acidentes", yaxis_title="Causa", margin=dict(l=220, r=90, t=70, b=50))
-    fig.update_xaxes(range=[0, max(top["accidents"].max() * 1.18, 1)])
+    fig = px.bar(top, x="accidents", y="accident_type", orientation="h")
+    fig.update_traces(
+        marker_color="#d18a1c",
+        text=top["label"],
+        textposition="outside",
+        cliponaxis=False,
+        hovertemplate="%{x:,} ocorrencias<br>%{y}",
+    )
+    fig.update_xaxes(range=[0, max(top["accidents"].max() * 1.15, 1)])
     fig.update_yaxes(autorange="reversed")
-    return fig
+    return _apply_layout(fig, height=320, xaxis_title="Ocorrencias", yaxis_title="Causa")
 
 
 def period_donut(frame: pd.DataFrame) -> go.Figure:
     if frame.empty:
-        return _empty_figure("Sem períodos para exibir")
-    fig = px.pie(frame, names="time_period", values="accidents", title="Distribuição por período do dia", hole=0.45)
-    fig.update_traces(textposition="inside", textinfo="percent+label")
-    fig.update_layout(template="plotly_white", height=360)
+        return _empty_figure("Sem periodos para exibir")
+
+    fig = px.pie(
+        frame,
+        names="time_period",
+        values="accidents",
+        hole=0.62,
+        color_discrete_sequence=["#17436a", "#0f766e", "#d18a1c", "#c44935", "#8a98a6"],
+    )
+    fig.update_traces(textinfo="percent", textposition="inside", hovertemplate="%{label}: %{value:,} ocorrencias")
+    fig.update_traces(textfont=dict(color=FONT_COLOR))
+    fig.update_layout(
+        height=320,
+        margin=dict(l=12, r=12, t=12, b=12),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family=BASE_FONT, color=FONT_COLOR),
+        legend=dict(orientation="v", x=1.02, y=0.5, font=dict(color=MUTED_COLOR)),
+    )
     return fig
 
 
-def collisions_map(frame: pd.DataFrame) -> go.Figure:
-    if {"latitude", "longitude"}.issubset(frame.columns):
-        sample = frame.dropna(subset=["latitude", "longitude"]).head(2000)
-        # prepare customdata for formatted hovertemplate
-        sample = sample.assign(_occurred=sample["occurred_at"].dt.strftime("%Y-%m-%d %H:%M"), _injured=sample.get("injured", 0), _fatal=sample.get("fatalities", 0))
-        fig = px.scatter_mapbox(
-            sample,
-            lat="latitude",
-            lon="longitude",
-            color="severity",
-            hover_name="city" if "city" in sample.columns else None,
-            custom_data=["_occurred", "_injured", "_fatal", "accident_type"],
-            zoom=4,
-            height=420,
-            title="Mapa de acidentes (amostra)",
-            color_discrete_sequence=COLOR_SCALE,
-            mapbox_style="open-street-map",
-        )
-        fig.update_traces(
-            hovertemplate="<b>%{hovertext}</b><br>Data: %{customdata[0]}<br>Feridos: %{customdata[1]:,}<br>Mortos: %{customdata[2]:,}<br>Causa: %{customdata[3]}"
-        )
-        fig.update_layout(margin=dict(l=0, r=0, t=40, b=0))
-        return fig
-    return _empty_figure("Latitude e longitude não estão disponíveis")
+def severity_donut(frame: pd.DataFrame) -> go.Figure:
+    if frame.empty:
+        return _empty_figure("Sem severidade para exibir")
+
+    labels = frame["severity_label"].astype(str).tolist()
+    values = frame["accidents"].tolist()
+    colors = [SEVERITY_COLORS.get(label, "#5f6b76") for label in labels]
+    total = int(sum(values))
+
+    fig = go.Figure(
+        data=[
+            go.Pie(
+                labels=labels,
+                values=values,
+                hole=0.68,
+                marker=dict(colors=colors),
+                sort=False,
+                direction="clockwise",
+                textinfo="percent",
+                textfont=dict(color=FONT_COLOR),
+                hovertemplate="%{label}: %{value:,} ocorrencias",
+            )
+        ]
+    )
+    fig.add_annotation(
+        text=f"<b>{total:,}</b><br><span style='font-size:12px'>ocorrencias</span>".replace(",", "."),
+        x=0.5,
+        y=0.5,
+        showarrow=False,
+        font=dict(size=18, color=FONT_COLOR),
+    )
+    fig.update_layout(
+        height=320,
+        margin=dict(l=12, r=12, t=12, b=12),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family=BASE_FONT, color=FONT_COLOR),
+        legend=dict(orientation="v", x=1.02, y=0.5, font=dict(color=MUTED_COLOR)),
+    )
+    return fig
 
 
 def hourly_heatmap(frame: pd.DataFrame) -> go.Figure:
-    if "occurred_at" in frame.columns:
-        # translate day names to pt-BR
-        day_map = {
-            "Monday": "Segunda",
-            "Tuesday": "Terça",
-            "Wednesday": "Quarta",
-            "Thursday": "Quinta",
-            "Friday": "Sexta",
-            "Saturday": "Sábado",
-            "Sunday": "Domingo",
-        }
-        tmp = frame.dropna(subset=["occurred_at"]).assign(hour=lambda d: d["occurred_at"].dt.hour, day=lambda d: d["occurred_at"].dt.day_name().map(day_map))
-        pivot = (
-            tmp.groupby(["day", "hour"]).size().reset_index(name="count").pivot(index="day", columns="hour", values="count").fillna(0)
+    if "occurred_at" not in frame.columns:
+        return _empty_figure("Sem datas para montar a matriz temporal")
+
+    day_map = {
+        "Monday": "Segunda",
+        "Tuesday": "Terca",
+        "Wednesday": "Quarta",
+        "Thursday": "Quinta",
+        "Friday": "Sexta",
+        "Saturday": "Sabado",
+        "Sunday": "Domingo",
+    }
+    temp = frame.dropna(subset=["occurred_at"]).assign(
+        hour=lambda current: current["occurred_at"].dt.hour,
+        day=lambda current: current["occurred_at"].dt.day_name().map(day_map),
+    )
+    pivot = (
+        temp.groupby(["day", "hour"])
+        .size()
+        .reset_index(name="count")
+        .pivot(index="day", columns="hour", values="count")
+        .fillna(0)
+    )
+    days = ["Segunda", "Terca", "Quarta", "Quinta", "Sexta", "Sabado", "Domingo"]
+    available = [day for day in days if day in pivot.index]
+
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=pivot.loc[available].values if not pivot.empty else [[]],
+            x=pivot.columns.tolist() if not pivot.empty else [],
+            y=available,
+            colorscale=[
+                [0.0, "#eaf1ee"],
+                [0.22, "#a8cfc2"],
+                [0.48, "#5aa18f"],
+                [0.74, "#d18a1c"],
+                [1.0, "#c44935"],
+            ],
+            hovertemplate="%{y} | %{x}h: %{z} ocorrencias",
+            colorbar=dict(title="Volume", thickness=10),
         )
-        # Ensure weekday order
-        days = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
-        available = [d for d in days if d in pivot.index]
-        z = pivot.loc[available].values if not pivot.empty else [[]]
-        fig = go.Figure(data=go.Heatmap(z=z, x=pivot.columns.tolist() if not pivot.empty else [], y=available, colorscale="Viridis", hovertemplate="%{y} %{x}h: %{z} acidentes"))
-        fig.update_layout(title="Mapa de calor por hora e dia", xaxis_title="Hora do dia", yaxis_title="Dia da semana", height=420)
-        return fig
-    return _empty_figure("Sem datas para montar o mapa de calor")
+    )
+    fig.update_layout(
+        height=320,
+        margin=dict(l=16, r=16, t=12, b=16),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family=BASE_FONT, color=FONT_COLOR),
+    )
+    fig.update_xaxes(title="Hora do dia", showgrid=False, zeroline=False, tickfont=dict(color=MUTED_COLOR), title_font=dict(color=MUTED_COLOR))
+    fig.update_yaxes(title="Dia da semana", showgrid=False, zeroline=False, tickfont=dict(color=MUTED_COLOR), title_font=dict(color=MUTED_COLOR))
+    return fig
 
 
 def weekend_bars(frame: pd.DataFrame) -> go.Figure:
     if frame.empty:
         return _empty_figure("Sem registros para comparar")
-    fig = px.bar(frame, x="day_type", y="accidents", title="Dias úteis vs fim de semana", text="accidents")
-    fig.update_traces(marker_color=COLOR_SCALE[3], textposition="outside")
-    fig.update_layout(template="plotly_white", height=340, xaxis_title="Tipo de dia", yaxis_title="Acidentes")
-    return fig
+
+    fig = px.bar(frame, x="day_type", y="accidents", text="accidents")
+    fig.update_traces(marker_color="#17436a", textposition="outside")
+    return _apply_layout(fig, height=300, xaxis_title="Tipo de dia", yaxis_title="Ocorrencias")
 
 
 def scatter_severity(frame: pd.DataFrame, x_col: str, y_col: str) -> go.Figure:
     if frame.empty:
         return _empty_figure("Sem registros para o filtro selecionado")
+
     fig = px.scatter(
         frame,
         x=x_col,
         y=y_col,
         color="severity",
         hover_data=["state", "city", "accident_type", "occurred_at"],
-        title="Relação entre feridos e mortos",
-        color_discrete_sequence=COLOR_SCALE,
+        color_discrete_map={"light": "#0f766e", "serious": "#d18a1c", "fatal": "#c44935"},
     )
-    fig.update_traces(hovertemplate="%{x:,} %{xaxis.title.text}<br>%{y:,} %{yaxis.title.text}<br>%{customdata[0]} - %{customdata[1]}<br>%{customdata[2]}")
-    fig.update_layout(template="plotly_white", height=360)
-    return fig
+    fig.update_traces(
+        marker=dict(size=8, opacity=0.68),
+        hovertemplate="%{x:,} %{xaxis.title.text}<br>%{y:,} %{yaxis.title.text}<br>%{customdata[0]} - %{customdata[1]}<br>%{customdata[2]}",
+    )
+    return _apply_layout(
+        fig,
+        height=300,
+        xaxis_title=x_col.replace("_", " ").title(),
+        yaxis_title=y_col.replace("_", " ").title(),
+    )

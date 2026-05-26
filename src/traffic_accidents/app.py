@@ -2,25 +2,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dash import Dash, Input, Output, dcc, html, State, dash_table
 import pandas as pd
-from flask_caching import Cache
+from dash import Dash, Input, Output, State, dash_table, dcc, html
 
-from .analysis import build_kpis, by_accident_type, by_period, by_state, monthly_trend, weekend_comparison
-from .data import load_raw_accidents, generate_demo_data
-from .figures import accident_type_bar, kpi_figure, monthly_line, period_donut, scatter_severity, state_bar, weekend_bars
+from .analysis import build_kpis, by_accident_type, by_city, by_period, by_severity, by_state, monthly_trend, weekend_comparison
+from .data import generate_demo_data, load_raw_accidents
+from .figures import accident_type_bar, city_bar, hourly_heatmap, monthly_line, period_donut, severity_donut, state_bar, weekend_bars
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 try:
     data = load_raw_accidents()
 except Exception as exc:
-    # if loading real CSVs is slow or fails, fall back to demo dataset so the app starts
     print("Warning: load_raw_accidents failed, falling back to demo data:", exc)
     data = generate_demo_data(rows=20000)
 
-app = Dash(__name__, title="Acidentes de Trânsito PRF", assets_folder=str(PROJECT_ROOT / "assets"))
-cache = Cache(app.server, config={"CACHE_TYPE": "SimpleCache"})
+app = Dash(__name__, title="Central Analítica de Acidentes", assets_folder=str(PROJECT_ROOT / "assets"))
 
 DISPLAY_COLUMNS = [
     "occurred_at",
@@ -40,7 +37,7 @@ DISPLAY_COLUMNS = [
 COLUMN_LABELS = {
     "occurred_at": "Data e hora",
     "state": "UF",
-    "city": "Município",
+    "city": "Cidade",
     "br": "BR",
     "km": "Km",
     "accident_type": "Causa",
@@ -48,216 +45,414 @@ COLUMN_LABELS = {
     "fatalities": "Mortos",
     "injured": "Feridos",
     "vehicles": "Veículos",
-    "severity": "Severidade",
+    "severity": "Gravidade",
     "source_file": "Arquivo",
 }
 
+SEVERITY_OPTIONS = [
+    {"label": "Leves", "value": "light"},
+    {"label": "Graves", "value": "serious"},
+    {"label": "Fatais", "value": "fatal"},
+]
 
-def _card(title: str, component_id: str) -> html.Div:
+
+def _graph_panel(title: str, component_id: str, subtitle: str, class_name: str = "panel") -> html.Div:
     return html.Div(
         [
-            html.H4(title, className="card-title"),
+            html.Div(
+                [
+                    html.H3(title, className="panel-title"),
+                    html.P(subtitle, className="panel-subtitle"),
+                ],
+                className="panel-header",
+            ),
             dcc.Graph(id=component_id, config={"displayModeBar": False}),
         ],
-        className="card",
+        className=class_name,
     )
 
 
-def _safe_range(column: str, default: tuple[float, float] = (0.0, 1000.0)) -> tuple[float, float]:
-    if column not in data.columns:
-        return default
-    values = pd.to_numeric(data[column], errors="coerce").dropna()
-    if values.empty:
-        return default
-    return float(values.min()), float(values.max())
+def _toolbar_dropdown(label: str, component_id: str, options: list[dict[str, str]]) -> html.Div:
+    return html.Div(
+        [
+            html.Label(label, className="toolbar-label"),
+            dcc.Dropdown(
+                id=component_id,
+                options=options,
+                value=None,
+                placeholder="Todas",
+                clearable=True,
+                multi=False,
+                className="toolbar-dropdown",
+            ),
+        ],
+        className="toolbar-field",
+    )
 
 
 def _format_number(value: float | int) -> str:
     return f"{int(value):,}".replace(",", ".")
 
 
-def _filter_data(state, start_date, end_date, severity, city, km_range) -> pd.DataFrame:
+def _format_percent(value: float) -> str:
+    return f"{value:.0f}%"
+
+
+def _format_date_label(value) -> str:
+    if value is None or pd.isna(value):
+        return "--"
+    return pd.Timestamp(value).strftime("%d/%m/%Y")
+
+
+def _metric_card(title: str, value: str, detail: str, tone: str = "default") -> html.Div:
+    return html.Div(
+        [
+            html.Div(title, className="metric-card-label"),
+            html.Div(value, className="metric-card-value"),
+            html.Div(detail, className="metric-card-detail"),
+        ],
+        className=f"metric-card metric-card--{tone}",
+    )
+
+
+def _metric_cards(frame: pd.DataFrame) -> list[html.Div]:
+    kpis = build_kpis(frame)
+    return [
+        _metric_card("Registros filtrados", _format_number(kpis["total_accidents"]), "Ocorrências ativas no recorte", "primary"),
+        _metric_card("Mortos", _format_number(kpis["fatalities"]), "Óbitos consolidados", "danger"),
+        _metric_card("Feridos", _format_number(kpis["injured"]), "Pessoas lesionadas", "warning"),
+        _metric_card("Estados / UFs no filtro", _format_number(kpis["states_in_scope"]), "Cobertura territorial ativa", "neutral"),
+        _metric_card("Percentual de casos graves", _format_percent(kpis["severe_share"] * 100), "Graves + fatais", "accent"),
+        _metric_card("Arquivos integrados", _format_number(kpis["source_files"]), "Bases consolidadas", "neutral"),
+    ]
+
+
+def _filter_data(
+    *,
+    severity: str | None = None,
+    state: str | None = None,
+    city: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> pd.DataFrame:
     filtered = data.copy()
+    if severity:
+        filtered = filtered[filtered["severity"] == severity]
     if state:
-        filtered = filtered[filtered["state"].isin(state if isinstance(state, list) else [state])]
+        filtered = filtered[filtered["state"] == state]
+    if city:
+        filtered = filtered[filtered["city"] == city]
     if start_date:
         filtered = filtered[filtered["occurred_at"] >= pd.to_datetime(start_date)]
     if end_date:
-        filtered = filtered[filtered["occurred_at"] <= pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)]
-    if severity:
-        filtered = filtered[filtered["severity"].isin(severity if isinstance(severity, list) else [severity])]
-    if city:
-        filtered = filtered[filtered["city"].isin(city if isinstance(city, list) else [city])]
-    if km_range and "km" in filtered.columns:
-        try:
-            low, high = (float(km_range[0]), float(km_range[1])) if isinstance(km_range, (list, tuple)) else (float(km_range), float(km_range))
-            filtered = filtered[(filtered["km"] >= low) & (filtered["km"] <= high)]
-        except Exception:
-            pass
+        end_timestamp = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+        filtered = filtered[filtered["occurred_at"] <= end_timestamp]
     return filtered
 
 
-km_min, km_max = _safe_range("km")
+def _search_table(frame: pd.DataFrame, search_value: str | None) -> pd.DataFrame:
+    if not search_value:
+        return frame
+
+    search = str(search_value).strip()
+    if not search:
+        return frame
+
+    searchable_columns = [column for column in DISPLAY_COLUMNS if column in frame.columns]
+    mask = pd.Series(False, index=frame.index)
+    for column in searchable_columns:
+        mask = mask | frame[column].astype(str).str.contains(search, case=False, na=False)
+    return frame[mask]
+
+
+def _format_table_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    table_frame = frame.copy()
+    if "occurred_at" in table_frame.columns:
+        table_frame["occurred_at"] = pd.to_datetime(table_frame["occurred_at"], errors="coerce").dt.strftime("%d/%m/%Y %H:%M")
+    if "km" in table_frame.columns:
+        table_frame["km"] = pd.to_numeric(table_frame["km"], errors="coerce").map(
+            lambda value: "" if pd.isna(value) else f"{value:,.1f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        )
+    for numeric_column in ("fatalities", "injured", "vehicles", "br"):
+        if numeric_column in table_frame.columns:
+            table_frame[numeric_column] = (
+                pd.to_numeric(table_frame[numeric_column], errors="coerce")
+                .fillna(0)
+                .astype(int)
+                .map(lambda value: f"{value:,}".replace(",", "."))
+            )
+    return table_frame
+
+
+data_min = data["occurred_at"].min() if "occurred_at" in data.columns and not data.empty else None
+data_max = data["occurred_at"].max() if "occurred_at" in data.columns and not data.empty else None
+data_window = f"{_format_date_label(data_min)} → {_format_date_label(data_max)}"
+base_source_count = int(data["source_file"].nunique()) if "source_file" in data.columns else 0
+base_state_count = int(data["state"].nunique()) if "state" in data.columns else 0
+state_options = [{"label": state, "value": state} for state in sorted(data["state"].dropna().unique())]
+city_options = [{"label": city, "value": city} for city in sorted(data.get("city", pd.Series(dtype=str)).dropna().unique())]
 
 
 app.layout = html.Div(
     [
-        html.Div(
+        html.Header(
             [
-                html.H1("Dashboard de Acidentes de Trânsito"),
-                html.P("Dados PRF/Datatran com visão executiva, filtros e tabela navegável."),
-            ],
-            className="hero",
-        ),
-                dcc.Tabs(
-                    id="tabs",
-                    value="overview",
-                    className="tabs",
-                    children=[
-                        dcc.Tab(label="Visão geral", value="overview", className="tab", selected_className="tab--selected", children=[
-                    html.Div(
-                        [
-                            html.Div(className="kpi-grid", children=[
-                                html.Div(id="kpi-total", className="kpi-card"),
-                                html.Div(id="kpi-fatalities", className="kpi-card"),
-                                html.Div(id="kpi-injured", className="kpi-card"),
-                                html.Div(id="kpi-severe", className="kpi-card"),
-                            ]),
-                            html.Div(className="grid-two", children=[
-                                _card("Tendência mensal", "chart-monthly"),
-                                _card("UFs com mais acidentes", "chart-state"),
-                            ]),
-                            html.Div(className="grid-two", children=[
-                                _card("Principais causas", "chart-type"),
-                                _card("Períodos do dia", "chart-period"),
-                            ]),
-                            html.Div(className="grid-two", children=[
-                                    html.Div(children=[
-                                        html.Div(className="card", children=[
-                                            html.Div([html.Button("Carregar mapa", id="btn-load-map", n_clicks=0, className="primary-button")], style={"textAlign": "right", "marginBottom": "8px"}),
-                                            dcc.Graph(id="chart-map", config={"displayModeBar": False}),
-                                        ])
-                                    ]),
-                                    _card("Mapa de calor horário", "chart-heatmap"),
-                            ]),
-                        ],
-                        className="page",
-                    )
-                ]),
-                dcc.Tab(label="Exploração", value="explore", className="tab", selected_className="tab--selected", children=[
-                    html.Div(
-                        [
-                            html.Div(
-                                [
-                                    html.Div(
-                                        [
-                                            html.Label("Data"),
-                                            dcc.DatePickerRange(
-                                                id="date-range",
-                                                start_date=data["occurred_at"].min().date() if not data.empty else None,
-                                                end_date=data["occurred_at"].max().date() if not data.empty else None,
-                                            ),
-                                        ],
-                                        className="filter",
-                                    ),
-                                    html.Div(
-                                        [
-                                            html.Label("UF"),
-                                            dcc.Dropdown(
-                                                id="state-filter",
-                                                options=[{"label": s, "value": s} for s in sorted(data["state"].dropna().unique())],
-                                                value=None,
-                                                multi=True,
-                                            ),
-                                        ],
-                                        className="filter",
-                                    ),
-                                    html.Div(
-                                        [
-                                            html.Label("Município"),
-                                            dcc.Dropdown(
-                                                id="city-filter",
-                                                options=[{"label": c, "value": c} for c in sorted(data.get("city", pd.Series(dtype=str)).dropna().unique())],
-                                                value=None,
-                                                multi=True,
-                                            ),
-                                        ],
-                                        className="filter",
-                                    ),
-                                    html.Div(
-                                        [
-                                            html.Label("Severidade"),
-                                            dcc.Dropdown(
-                                                id="severity-filter",
-                                                options=[{"label": s.title(), "value": s} for s in sorted(data["severity"].dropna().unique())],
-                                                value=None,
-                                                multi=True,
-                                            ),
-                                        ],
-                                        className="filter",
-                                    ),
-                                    html.Div(
-                                        [
-                                            html.Label("Quilometragem (km)"),
-                                            dcc.RangeSlider(
-                                                id="km-range",
-                                                min=km_min,
-                                                max=km_max,
-                                                value=[km_min, km_max],
-                                                marks={
-                                                    int(km_min): f"{int(km_min):,}".replace(",", "."),
-                                                    int(km_max): f"{int(km_max):,}".replace(",", "."),
-                                                },
-                                                tooltip={"placement": "bottom", "always_visible": False},
-                                                step=1,
-                                            ),
-                                        ],
-                                        className="filter",
-                                    ),
-                                    html.Div(className="filter", children=[
-                                        html.Button("Exportar CSV filtrado", id="btn-download", className="primary-button"),
-                                        dcc.Download(id="download-data"),
-                                    ]),
-                                ],
-                                className="filters",
-                            ),
-                            html.Div(id="filter-summary", className="summary-grid"),
-                            html.Div(className="grid-two", children=[
-                                _card("Comparação por causa", "chart-explore-type"),
-                                _card("Comparação temporal", "chart-explore-line"),
-                            ]),
-                            html.Div(className="grid-two", children=[
-                                _card("Distribuição por período", "chart-explore-period"),
-                                _card("Fim de semana vs úteis", "chart-explore-weekend"),
-                            ]),
-                            html.Div(className="card", children=[
-                                html.H4("Relação entre variáveis"),
-                                dcc.Graph(id="chart-scatter", config={"displayModeBar": False}),
-                            ]),
-                            html.Div(className="card", children=[
-                                html.H4("Tabela de registros"),
-                                dash_table.DataTable(
-                                    id="table-explore",
-                                        columns=[],
-                                        data=[],
-                                        page_size=15,
-                                        page_current=0,
-                                        page_action='custom',
-                                        sort_action='custom',
-                                        sort_mode='single',
-                                        sort_by=[],
-                                    style_table={"overflowX": "auto"},
-                                    style_cell={"textAlign": "left", "padding": "8px", "fontSize": "13px", "whiteSpace": "normal"},
-                                    style_header={"fontWeight": "700", "backgroundColor": "#eef2f7"},
-                                    style_data_conditional=[
-                                        {"if": {"row_index": "odd"}, "backgroundColor": "#f8fafc"}
-                                    ],
+                html.Div(
+                    [
+                        html.Img(
+                            src=app.get_asset_url("logo-detran.png"),
+                            className="masthead-logo",
+                            alt="Logo DETRAN",
+                        ),
+                        html.Div(
+                            [
+                                html.Div("Central Analítica de Acidentes", className="masthead-title"),
+                                html.Div("DETRAN | Dados consolidados de ocorrências de trânsito", className="masthead-subtitle"),
+                                html.P(
+                                    "Painel operacional para análise de gravidade, localização e evolução temporal dos acidentes.",
+                                    className="masthead-copy",
                                 ),
-                            ]),
-                        ],
-                        className="page",
-                    )
-                ]),
+                                html.Div(
+                                    [
+                                        html.Div(
+                                            [
+                                                html.Div("Período da base", className="masthead-meta-label"),
+                                                html.Div(data_window, className="masthead-meta-value"),
+                                            ],
+                                            className="masthead-meta",
+                                        ),
+                                        html.Div(
+                                            [
+                                                html.Div("Arquivos integrados", className="masthead-meta-label"),
+                                                html.Div(_format_number(base_source_count), className="masthead-meta-value"),
+                                            ],
+                                            className="masthead-meta",
+                                        ),
+                                        html.Div(
+                                            [
+                                                html.Div("UFs monitoradas", className="masthead-meta-label"),
+                                                html.Div(_format_number(base_state_count), className="masthead-meta-value"),
+                                            ],
+                                            className="masthead-meta",
+                                        ),
+                                    ],
+                                    className="masthead-meta-row",
+                                ),
+                            ],
+                            className="masthead-title-block",
+                        ),
+                    ],
+                    className="masthead-brand",
+                ),
+                html.Div(
+                    [
+                        _toolbar_dropdown("Gravidade", "filter-severity", SEVERITY_OPTIONS),
+                        _toolbar_dropdown("Estado", "filter-state", state_options),
+                        _toolbar_dropdown("Cidade", "filter-city", city_options),
+                    ],
+                    className="toolbar toolbar--header",
+                ),
+            ],
+            className="masthead",
+        ),
+        dcc.Tabs(
+            id="tabs",
+            value="overview",
+            className="tabs",
+            children=[
+                dcc.Tab(
+                    label="Visão Geral",
+                    value="overview",
+                    className="tab",
+                    selected_className="tab--selected",
+                    children=[
+                        html.Div(
+                            [
+                                html.Div(
+                                    [
+                                        html.H2("Visão Geral", className="section-title"),
+                                        html.P("Panorama executivo das ocorrências de trânsito.", className="section-copy"),
+                                    ],
+                                    className="section-header",
+                                ),
+                                html.Div(id="overview-metrics", className="metric-grid"),
+                                html.Div(
+                                    [
+                                        _graph_panel(
+                                            "Evolução mensal",
+                                            "overview-monthly",
+                                            "Série histórica das ocorrências consolidadas.",
+                                            class_name="panel panel--span-2",
+                                        ),
+                                        _graph_panel(
+                                            "Comparação por causa",
+                                            "overview-causes",
+                                            "Top causas com maior recorrência no recorte.",
+                                        ),
+                                        _graph_panel(
+                                            "Distribuição por dia e período",
+                                            "overview-heatmap",
+                                            "Matriz de intensidade temporal das ocorrências.",
+                                            class_name="panel panel--span-2",
+                                        ),
+                                        _graph_panel(
+                                            "Severidade das ocorrências",
+                                            "overview-severity",
+                                            "Distribuição por nível de gravidade.",
+                                        ),
+                                        _graph_panel(
+                                            "Estados com mais ocorrências",
+                                            "overview-states",
+                                            "Ranking técnico por unidade federativa.",
+                                        ),
+                                        _graph_panel(
+                                            "Top cidades",
+                                            "overview-cities",
+                                            "Municípios com maior concentração de registros.",
+                                        ),
+                                        _graph_panel(
+                                            "Distribuição por período",
+                                            "overview-period",
+                                            "Concentração dos casos ao longo do dia.",
+                                        ),
+                                    ],
+                                    className="overview-analytics-grid",
+                                ),
+                            ],
+                            className="page page--overview",
+                        )
+                    ],
+                ),
+                dcc.Tab(
+                    label="Exploração",
+                    value="explore",
+                    className="tab",
+                    selected_className="tab--selected",
+                    children=[
+                        html.Div(
+                            [
+                                html.Div(
+                                    [
+                                        html.H2("Exploração de Registros", className="section-title"),
+                                        html.P(
+                                            "Consulta detalhada com recorte temporal e exportação dos registros filtrados.",
+                                            className="section-copy",
+                                        ),
+                                    ],
+                                    className="section-header",
+                                ),
+                                html.Div(
+                                    [
+                                        html.Div(
+                                            [
+                                                html.Label("Período", className="toolbar-label"),
+                                                dcc.DatePickerRange(
+                                                    id="explore-period",
+                                                    start_date=data_min.date() if data_min is not None else None,
+                                                    end_date=data_max.date() if data_max is not None else None,
+                                                    display_format="DD/MM/YYYY",
+                                                    clearable=True,
+                                                    minimum_nights=0,
+                                                ),
+                                            ],
+                                            className="toolbar-field toolbar-field--period",
+                                        ),
+                                        html.Div(
+                                            [
+                                                html.Label("Ação", className="toolbar-label"),
+                                                html.Button("Exportar CSV", id="btn-download", className="primary-button"),
+                                                dcc.Download(id="download-data"),
+                                            ],
+                                            className="toolbar-field toolbar-field--action",
+                                        ),
+                                    ],
+                                    className="toolbar toolbar--explore",
+                                ),
+                                html.Div(id="explore-metrics", className="metric-grid metric-grid--compact"),
+                                html.Div(
+                                    [
+                                        _graph_panel(
+                                            "Evolução do recorte",
+                                            "explore-monthly",
+                                            "Série temporal aplicada à consulta atual.",
+                                            class_name="panel panel--span-2",
+                                        ),
+                                        _graph_panel(
+                                            "Comparação por causa",
+                                            "explore-causes",
+                                            "Causas com maior presença dentro do recorte filtrado.",
+                                        ),
+                                        _graph_panel(
+                                            "Dias úteis x fim de semana",
+                                            "explore-weekend",
+                                            "Comportamento do volume entre tipos de dia.",
+                                        ),
+                                    ],
+                                    className="explore-analytics-grid",
+                                ),
+                                html.Div(
+                                    [
+                                        html.Div(
+                                            [
+                                                html.H3("Registros filtrados", className="panel-title"),
+                                                html.P(
+                                                    "Busca textual, paginação e ordenação sobre os dados selecionados.",
+                                                    className="panel-subtitle",
+                                                ),
+                                            ],
+                                            className="panel-header panel-header--table",
+                                        ),
+                                        dcc.Input(
+                                            id="table-search",
+                                            type="text",
+                                            placeholder="Buscar por cidade, causa, BR, arquivo ou classificação...",
+                                            className="table-search",
+                                        ),
+                                        dash_table.DataTable(
+                                            id="table-explore",
+                                            columns=[],
+                                            data=[],
+                                            page_size=15,
+                                            page_current=0,
+                                            page_action="custom",
+                                            sort_action="custom",
+                                            sort_mode="single",
+                                            sort_by=[],
+                                            style_table={"overflowX": "auto"},
+                                            style_cell={
+                                                "textAlign": "left",
+                                                "padding": "10px 12px",
+                                                "fontSize": "13px",
+                                                "whiteSpace": "normal",
+                                                "backgroundColor": "#0f1b28",
+                                                "color": "#e4edf4",
+                                                "border": "0",
+                                                "fontFamily": "Bahnschrift, Aptos, Trebuchet MS, sans-serif",
+                                            },
+                                            style_header={
+                                                "fontWeight": "700",
+                                                "backgroundColor": "#132738",
+                                                "color": "#f4f8fb",
+                                                "borderBottom": "1px solid #28445a",
+                                                "fontFamily": "Cascadia Code, IBM Plex Mono, Consolas, monospace",
+                                                "textTransform": "uppercase",
+                                                "fontSize": "11px",
+                                                "letterSpacing": "0.08em",
+                                            },
+                                            style_data_conditional=[
+                                                {"if": {"row_index": "odd"}, "backgroundColor": "#132233"},
+                                                {"if": {"state": "active"}, "backgroundColor": "#17354b", "border": "1px solid #2f6f96"},
+                                                {"if": {"state": "selected"}, "backgroundColor": "#17415c", "border": "1px solid #39a7c9"},
+                                            ],
+                                        ),
+                                    ],
+                                    className="panel panel--table",
+                                ),
+                            ],
+                            className="page",
+                        )
+                    ],
+                ),
             ],
         ),
     ],
@@ -266,172 +461,123 @@ app.layout = html.Div(
 
 
 @app.callback(
-    Output("kpi-total", "children"),
-    Output("kpi-fatalities", "children"),
-    Output("kpi-injured", "children"),
-    Output("kpi-severe", "children"),
-    Output("chart-monthly", "figure"),
-    Output("chart-state", "figure"),
-    Output("chart-type", "figure"),
-    Output("chart-period", "figure"),
-    Output("chart-heatmap", "figure"),
-    Input("tabs", "value"),
+    Output("filter-city", "options"),
+    Output("filter-city", "value"),
+    Input("filter-state", "value"),
+    State("filter-city", "value"),
 )
-def update_overview(_: str):
-    kpis = build_kpis(data)
-    monthly = monthly_trend(data)
-    states = by_state(data)
-    accident_types = by_accident_type(data)
-    periods = by_period(data)
-    # cached geo
-    # defer heavy map generation — render empty placeholder here
-    map_fig = {}
-    heat_fig = None
-    try:
-        from .figures import hourly_heatmap
-        heat_fig = hourly_heatmap(data)
-    except Exception:
-        heat_fig = {}
-    # build lightweight KPI HTML children
-    def _kpi_html(value, label, suffix=""):
-        display = f"{value:.0f}{suffix}" if suffix == "%" else (f"{int(value):,}" if isinstance(value, (int, float)) else str(value))
-        display = display.replace(",", ".")
-        return html.Div([html.Div(display, className="num"), html.Div(label, className="lbl")])
+def update_city_options(state, current_city):
+    if state:
+        city_frame = data[data["state"] == state]
+    else:
+        city_frame = data
 
+    options = [
+        {"label": city, "value": city}
+        for city in sorted(city_frame.get("city", pd.Series(dtype=str)).dropna().unique())
+    ]
+    valid_values = {option["value"] for option in options}
+    return options, current_city if current_city in valid_values else None
+
+
+@app.callback(
+    Output("overview-metrics", "children"),
+    Output("overview-monthly", "figure"),
+    Output("overview-causes", "figure"),
+    Output("overview-heatmap", "figure"),
+    Output("overview-severity", "figure"),
+    Output("overview-states", "figure"),
+    Output("overview-cities", "figure"),
+    Output("overview-period", "figure"),
+    Input("filter-severity", "value"),
+    Input("filter-state", "value"),
+    Input("filter-city", "value"),
+)
+def update_overview(severity, state, city):
+    filtered = _filter_data(severity=severity, state=state, city=city)
     return (
-        _kpi_html(kpis["total_accidents"], "Acidentes totais"),
-        _kpi_html(kpis["fatalities"], "Fatalidades"),
-        _kpi_html(kpis["injured"], "Feridos"),
-        _kpi_html(kpis["severe_share"] * 100, "Participação de casos graves", suffix="%"),
-        monthly_line(monthly),
-        state_bar(states),
-        accident_type_bar(accident_types),
-        period_donut(periods),
-        heat_fig,
+        _metric_cards(filtered),
+        monthly_line(monthly_trend(filtered)),
+        accident_type_bar(by_accident_type(filtered)),
+        hourly_heatmap(filtered),
+        severity_donut(by_severity(filtered)),
+        state_bar(by_state(filtered)),
+        city_bar(by_city(filtered)),
+        period_donut(by_period(filtered)),
     )
 
 
 @app.callback(
-    Output("chart-explore-type", "figure"),
-    Output("chart-explore-line", "figure"),
-    Output("chart-explore-period", "figure"),
-    Output("chart-explore-weekend", "figure"),
-    Output("chart-scatter", "figure"),
-    Input("state-filter", "value"),
-    Input("date-range", "start_date"),
-    Input("date-range", "end_date"),
-    Input("severity-filter", "value"),
-    Input("city-filter", "value"),
-    Input("km-range", "value"),
-)
-def update_explore(state, start_date, end_date, severity, city, km_range):
-    filtered = _filter_data(state, start_date, end_date, severity, city, km_range)
-
-    type_data = by_accident_type(filtered)
-    monthly = monthly_trend(filtered)
-    period_data = by_period(filtered)
-    weekend_data = weekend_comparison(filtered)
-
-    scatter_source = filtered
-
-    from .figures import accident_type_bar, monthly_line, period_donut, weekend_bars, scatter_severity
-
-    return (
-        accident_type_bar(type_data),
-        monthly_line(monthly),
-        period_donut(period_data),
-        weekend_bars(weekend_data),
-        scatter_severity(scatter_source, "injured", "fatalities"),
-    )
-
-
-
-@app.callback(
+    Output("explore-metrics", "children"),
+    Output("explore-monthly", "figure"),
+    Output("explore-causes", "figure"),
+    Output("explore-weekend", "figure"),
     Output("table-explore", "data"),
     Output("table-explore", "columns"),
     Output("table-explore", "page_count"),
-    Output("filter-summary", "children"),
-    Input("state-filter", "value"),
-    Input("date-range", "start_date"),
-    Input("date-range", "end_date"),
-    Input("severity-filter", "value"),
-    Input("city-filter", "value"),
-    Input("km-range", "value"),
+    Input("filter-severity", "value"),
+    Input("filter-state", "value"),
+    Input("filter-city", "value"),
+    Input("explore-period", "start_date"),
+    Input("explore-period", "end_date"),
+    Input("table-search", "value"),
     Input("table-explore", "page_current"),
     Input("table-explore", "page_size"),
     Input("table-explore", "sort_by"),
 )
-def update_table(state, start_date, end_date, severity, city, km_range, page_current, page_size, sort_by):
-    df = _filter_data(state, start_date, end_date, severity, city, km_range)
+def update_exploration(severity, state, city, start_date, end_date, search_value, page_current, page_size, sort_by):
+    filtered = _filter_data(
+        severity=severity,
+        state=state,
+        city=city,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
-    # sorting
+    table_source = _search_table(filtered, search_value)
     if sort_by:
-        col = sort_by[0]["column_id"]
-        asc = sort_by[0]["direction"] == "asc"
-        if col in df.columns:
-            df = df.sort_values(col, ascending=asc)
+        column_id = sort_by[0]["column_id"]
+        ascending = sort_by[0]["direction"] == "asc"
+        if column_id in table_source.columns:
+            table_source = table_source.sort_values(column_id, ascending=ascending)
 
-    # select columns to show
-    available = [c for c in DISPLAY_COLUMNS if c in df.columns]
-    tbl = df[available].copy()
-    if "occurred_at" in tbl.columns:
-        tbl["occurred_at"] = tbl["occurred_at"].dt.strftime("%d/%m/%Y %H:%M")
-
-    # pagination slice
+    available = [column for column in DISPLAY_COLUMNS if column in table_source.columns]
+    table_frame = _format_table_frame(table_source[available].copy())
+    page_current = page_current or 0
+    page_size = page_size or 15
     start = page_current * page_size
     end = start + page_size
-    page_df = tbl.iloc[start:end].copy()
+    page_frame = table_frame.iloc[start:end]
 
-    # format numeric columns vectorized
-    for numc in ("fatalities", "injured", "vehicles", "br"):
-        if numc in page_df.columns:
-            page_df[numc] = pd.to_numeric(page_df[numc], errors="coerce").fillna(0).astype(int).map(lambda value: f"{value:,}".replace(",", "."))
-    if "km" in page_df.columns:
-        page_df["km"] = pd.to_numeric(page_df["km"], errors="coerce").map(lambda value: "" if pd.isna(value) else f"{value:,.1f}".replace(",", "X").replace(".", ",").replace("X", "."))
-
-    data_records = page_df.to_dict("records")
-    columns = [{"name": COLUMN_LABELS.get(col, col.replace("_", " ").title()), "id": col} for col in available]
-    page_count = max(1, (len(tbl) + page_size - 1) // page_size)
-    summary = [
-        html.Div([html.Div(_format_number(len(df)), className="summary-value"), html.Div("registros filtrados", className="summary-label")], className="summary-card"),
-        html.Div([html.Div(_format_number(df["fatalities"].fillna(0).sum()), className="summary-value"), html.Div("mortos", className="summary-label")], className="summary-card"),
-        html.Div([html.Div(_format_number(df["injured"].fillna(0).sum()), className="summary-value"), html.Div("feridos", className="summary-label")], className="summary-card"),
-        html.Div([html.Div(_format_number(df["state"].nunique()), className="summary-value"), html.Div("UFs no filtro", className="summary-label")], className="summary-card"),
-    ]
-    return data_records, columns, page_count, summary
-
-
-@app.callback(
-    Output("chart-map", "figure"),
-    Input("btn-load-map", "n_clicks"),
-)
-def load_map(n_clicks):
-    # only generate the map when user requests it
-    if not n_clicks:
-        return {}
-    try:
-        from .figures import collisions_map
-        fig = collisions_map(data)
-        return fig
-    except Exception:
-        return {}
+    return (
+        _metric_cards(filtered),
+        monthly_line(monthly_trend(filtered)),
+        accident_type_bar(by_accident_type(filtered)),
+        weekend_bars(weekend_comparison(filtered)),
+        page_frame.to_dict("records"),
+        [{"name": COLUMN_LABELS.get(column, column.replace("_", " ").title()), "id": column} for column in available],
+        max(1, (len(table_frame) + page_size - 1) // page_size),
+    )
 
 
 @app.callback(
     Output("download-data", "data"),
     Input("btn-download", "n_clicks"),
-    State("state-filter", "value"),
-    State("date-range", "start_date"),
-    State("date-range", "end_date"),
-    State("severity-filter", "value"),
-    State("city-filter", "value"),
-    State("km-range", "value"),
+    State("filter-severity", "value"),
+    State("filter-state", "value"),
+    State("filter-city", "value"),
+    State("explore-period", "start_date"),
+    State("explore-period", "end_date"),
     prevent_initial_call=True,
 )
-def download_filtered(_, state, start_date, end_date, severity, city, km_range):
-    filtered = _filter_data(state, start_date, end_date, severity, city, km_range)
+def download_filtered(_, severity, state, city, start_date, end_date):
+    filtered = _filter_data(
+        severity=severity,
+        state=state,
+        city=city,
+        start_date=start_date,
+        end_date=end_date,
+    )
     available = [column for column in DISPLAY_COLUMNS if column in filtered.columns]
-    export = filtered[available].copy()
-    if "occurred_at" in export.columns:
-        export["occurred_at"] = export["occurred_at"].dt.strftime("%d/%m/%Y %H:%M")
+    export = _format_table_frame(filtered[available].copy())
     return dcc.send_data_frame(export.to_csv, "acidentes_filtrados.csv", index=False)
