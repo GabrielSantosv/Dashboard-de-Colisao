@@ -265,69 +265,157 @@ body::after {
   color: #b0cfe0;
 }
 
-/* ── Dropdowns (react-select v1 / Dash Dropdown) ── */
+/* ══════════════════════════════════════════════════════════════
+   dcc.Dropdown — tema escuro para ambas as barras de filtros
+   Causa raiz: Dash 2.x usa CSS custom properties (--Dash-*)
+   que sobrescrevem qualquer cor sem !important nessas vars.
+   ══════════════════════════════════════════════════════════════ */
+
+/* 1 — Sobrescreve as CSS vars do Dash nas toolbars */
+.toolbar--header .dash-dropdown,
+.toolbar--header .toolbar-dropdown,
+.toolbar--explore .dash-dropdown,
+.toolbar--explore .toolbar-dropdown {
+  --Dash-Fill-Inverse-Strong: #091d2c;
+  --Dash-Fill-Inverse-Weak: #0c2235;
+  --Dash-Text-Strong: #f0f7fb;
+  --Dash-Text-Weak: #c8dae8;
+  --Dash-Text-Disabled: #7a9db5;
+  --Dash-Fill-Interactive-Strong: #39a7c9;
+  --Dash-Fill-Interactive-Weak: rgba(57, 167, 201, 0.18);
+  --Dash-Border-Strong: rgba(57, 167, 201, 0.4);
+  --Dash-Border-Weak: rgba(57, 167, 201, 0.2);
+}
+
+/* 2 — Controle (campo fechado) */
 .toolbar--header .Select-control,
-.toolbar--header .Select-menu-outer,
-.toolbar--explore .Select-control,
-.toolbar--explore .Select-menu-outer {
+.toolbar--explore .Select-control {
   background: #091d2c !important;
   border: 1px solid rgba(57, 167, 201, 0.3) !important;
   border-radius: 8px !important;
-  color: #e8f0f7 !important;
   box-shadow: none !important;
+  min-height: 44px !important;
 }
 
 .toolbar--header .Select-control.is-focused,
-.toolbar--explore .Select-control.is-focused {
-  border: 1px solid rgba(57, 167, 201, 0.65) !important;
+.toolbar--explore .Select-control.is-focused,
+.toolbar--header .Select.is-focused > .Select-control,
+.toolbar--explore .Select.is-focused > .Select-control {
+  background: #0c2235 !important;
+  border-color: rgba(57, 167, 201, 0.65) !important;
   box-shadow: 0 0 0 2px rgba(57, 167, 201, 0.18) !important;
 }
 
-.toolbar--header .Select-placeholder,
-.toolbar--header .Select-value-label,
-.toolbar--header .Select-input > input,
-.toolbar--header .Select-arrow-zone,
-.toolbar--header .Select-clear-zone,
-.toolbar--explore .Select-placeholder,
-.toolbar--explore .Select-value-label,
-.toolbar--explore .Select-input > input,
-.toolbar--explore .Select-arrow-zone,
-.toolbar--explore .Select-clear-zone {
-  background: transparent !important;
-  color: #e8f0f7 !important;
+.toolbar--header .Select.is-open > .Select-control,
+.toolbar--explore .Select.is-open > .Select-control {
+  background: #0c2235 !important;
+  border-color: rgba(57, 167, 201, 0.5) !important;
+  border-bottom-left-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
 }
 
+/* 3 — Valor selecionado e placeholder */
+.toolbar--header .Select-placeholder,
+.toolbar--explore .Select-placeholder {
+  color: #7a9db5 !important;
+}
+
+.toolbar--header .Select-value-label,
+.toolbar--header .Select--single .Select-value .Select-value-label,
+.toolbar--explore .Select-value-label,
+.toolbar--explore .Select--single .Select-value .Select-value-label {
+  color: #f0f7fb !important;
+  font-weight: 500 !important;
+}
+
+.toolbar--header .Select--single .Select-value,
+.toolbar--explore .Select--single .Select-value {
+  display: flex !important;
+  align-items: center !important;
+  line-height: normal !important;
+}
+
+/* 4 — Input de busca */
+.toolbar--header .Select-input > input,
+.toolbar--explore .Select-input > input {
+  background: transparent !important;
+  color: #f0f7fb !important;
+  caret-color: #39a7c9 !important;
+}
+
+/* 5 — Seta e botão limpar */
+.toolbar--header .Select-arrow,
+.toolbar--explore .Select-arrow {
+  border-top-color: #7a9db5 !important;
+}
+
+.toolbar--header .Select.is-open .Select-arrow,
+.toolbar--explore .Select.is-open .Select-arrow {
+  border-top-color: #39a7c9 !important;
+  border-bottom-color: #39a7c9 !important;
+}
+
+.toolbar--header .Select-clear,
+.toolbar--explore .Select-clear {
+  color: #7a9db5 !important;
+}
+
+.toolbar--header .Select-clear:hover,
+.toolbar--explore .Select-clear:hover {
+  color: #c65444 !important;
+}
+
+/* 6 — Menu suspenso */
 .toolbar--header .Select-menu-outer,
-.toolbar--explore .Select-menu-outer {
+.toolbar--header .Select-menu,
+.toolbar--explore .Select-menu-outer,
+.toolbar--explore .Select-menu {
   background: #091d2c !important;
   border: 1px solid rgba(57, 167, 201, 0.3) !important;
+  border-top: none !important;
   border-radius: 0 0 8px 8px !important;
   box-shadow: 0 16px 32px rgba(0, 0, 0, 0.5) !important;
   z-index: 200 !important;
 }
 
-.toolbar--header .Select-option,
-.toolbar--explore .Select-option {
+/* 7 — Opções */
+.toolbar--header .Select-menu-outer .Select-option,
+.toolbar--header .VirtualizedSelectOption,
+.toolbar--explore .Select-menu-outer .Select-option,
+.toolbar--explore .VirtualizedSelectOption {
   background: #091d2c !important;
-  color: #cde0ef !important;
+  color: #c8dde9 !important;
+  padding: 9px 12px !important;
 }
 
-.toolbar--header .Select-option.is-focused,
-.toolbar--explore .Select-option.is-focused {
+.toolbar--header .Select-menu-outer .Select-option.is-focused,
+.toolbar--header .VirtualizedSelectFocusedOption,
+.toolbar--explore .Select-menu-outer .Select-option.is-focused,
+.toolbar--explore .VirtualizedSelectFocusedOption {
   background: #132f45 !important;
   color: #ffffff !important;
 }
 
-.toolbar--header .Select-option.is-selected,
-.toolbar--explore .Select-option.is-selected {
+.toolbar--header .Select-menu-outer .Select-option.is-selected,
+.toolbar--header .VirtualizedSelectSelectedOption,
+.toolbar--explore .Select-menu-outer .Select-option.is-selected,
+.toolbar--explore .VirtualizedSelectSelectedOption {
   background: #1a3f5c !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+}
+
+.toolbar--header .Select-menu-outer .Select-option.is-selected.is-focused,
+.toolbar--explore .Select-menu-outer .Select-option.is-selected.is-focused {
+  background: #204e70 !important;
   color: #ffffff !important;
 }
 
 .toolbar--header .Select-noresults,
 .toolbar--explore .Select-noresults {
   background: #091d2c !important;
-  color: var(--muted) !important;
+  color: #7a9db5 !important;
+  font-style: italic !important;
 }
 
 /* ── DatePickerRange ── */

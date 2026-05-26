@@ -1,0 +1,114 @@
+﻿/* ==============================================================
+   TEMA ESCURO GLOBAL - COMPONENTES ABERTOS
+   Padronização de Dropdowns e DatePickers
+   -------------------------------------------------------------- */
+   ============================================================== */
+:root {
+  --Dash-Text-Strong: #f0f7fb !important;
+  --Dash-Fill-Inverse-Strong: #091d2c !important;
+  --Dash-Text-Disabled: #7a9db5 !important;
+  --Dash-Fill-Interactive-Strong: #39a7c9 !important;
+}
+
+/* --- DROPDOWNS (Menus abertos) --- */
+.Select-menu-outer, .Select-menu {
+  background-color: #091d2c !important;
+  border: 1px solid #1a3f5c !important;
+  color: #f0f7fb !important;
+  z-index: 1000 !important;
+}
+
+.Select-option {
+  background-color: #091d2c !important;
+  color: #c8dae8 !important;
+  padding: 10px 12px !important;
+}
+
+.Select-option.is-focused, .VirtualizedSelectFocusedOption {
+  background-color: #12344d !important;
+  color: #ffffff !important;
+}
+
+.Select-option.is-selected, .VirtualizedSelectSelectedOption, .dash-dropdown .Select-option:has(input:checked) {
+  background-color: #1a3f5c !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+}
+
+/* --- DATEPICKER (Calendário aberto) --- */
+.DateRangePicker_picker, .DatePickerSingle_picker, .DayPicker, .DayPicker__withBorder {
+  background-color: #071827 !important;
+  color: #f0f7fb !important;
+  border: 1px solid #1a3f5c !important;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.6) !important;
+}
+
+.CalendarMonth, .CalendarMonthGrid, .DayPicker_transitionContainer {
+  background-color: #071827 !important;
+}
+
+.CalendarMonth_caption {
+  color: #f0f7fb !important;
+  font-weight: 700 !important;
+}
+
+.DayPicker_weekHeader {
+  color: #7a9db5 !important;
+  border-bottom: 1px solid rgba(57, 167, 201, 0.15) !important;
+}
+
+.CalendarDay__default {
+  background-color: #071827 !important;
+  color: #c8dae8 !important;
+  border: 1px solid rgba(57, 167, 201, 0.1) !important;
+}
+
+.CalendarDay__default:hover {
+  background-color: #12344d !important;
+  color: #ffffff !important;
+  border: 1px solid #39a7c9 !important;
+}
+
+.CalendarDay__selected, .CalendarDay__selected:hover, .CalendarDay__selected_start, .CalendarDay__selected_end {
+  background-color: #39a7c9 !important;
+  color: #ffffff !important;
+  border: 1px solid #39a7c9 !important;
+}
+
+.CalendarDay__selected_span {
+  background-color: rgba(57, 167, 201, 0.25) !important;
+  color: #f0f7fb !important;
+}
+
+.CalendarDay__hovered_span {
+  background-color: rgba(57, 167, 201, 0.4) !important;
+  color: #ffffff !important;
+}
+
+.CalendarDay__today {
+  border: 1px solid #39a7c9 !important;
+}
+
+.DayPickerNavigation_button__default {
+  background-color: #091d2c !important;
+  border: 1px solid #1a3f5c !important;
+  border-radius: 6px !important;
+}
+
+.DayPickerNavigation_svg__horizontal {
+  fill: #f0f7fb !important;
+}
+
+/* --- CONTROLES (Inputs) --- */
+.Select-control, .DateRangePickerInput, .DateInput_input {
+  background-color: #091d2c !important;
+  color: #f0f7fb !important;
+}
+
+.Select-value-label, .Select-placeholder {
+  color: #f0f7fb !important;
+}
+
+.Select-placeholder {
+  color: #7a9db5 !important;
+}
