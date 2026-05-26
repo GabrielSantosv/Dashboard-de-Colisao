@@ -288,6 +288,87 @@ def weekend_bars(frame: pd.DataFrame) -> go.Figure:
     return _apply_layout(fig, height=300, xaxis_title="Tipo de dia", yaxis_title="Ocorrencias")
 
 
+def street_ranking_bar(frame: pd.DataFrame) -> go.Figure:
+    if frame.empty:
+        return _empty_figure("Sem vias suficientes para o recorte atual")
+
+    top = frame.head(10).copy()
+    top["label"] = top["accidents"].map(lambda value: f"{int(value):,}".replace(",", "."))
+    fig = px.bar(top, x="accidents", y="location_display", orientation="h")
+    fig.update_traces(
+        marker_color="#2c79a6",
+        text=top["label"],
+        textposition="outside",
+        cliponaxis=False,
+        hovertemplate="%{y}<br>%{x:,} acidentes",
+    )
+    fig.update_xaxes(range=[0, max(top["accidents"].max() * 1.14, 1)])
+    fig.update_yaxes(autorange="reversed")
+    return _apply_layout(fig, height=360, xaxis_title="Acidentes", yaxis_title="Via / local")
+
+
+def street_period_stacked_bar(frame: pd.DataFrame) -> go.Figure:
+    if frame.empty:
+        return _empty_figure("N\u00e3o h\u00e1 registros suficientes para gerar a an\u00e1lise de ruas e avenidas no recorte atual")
+
+    period_order = ["Madrugada", "Manh\u00e3", "Tarde", "Noite"]
+    period_colors = {
+        "Madrugada": "#12314b",
+        "Manh\u00e3": "#1a4d73",
+        "Tarde": "#2c79a6",
+        "Noite": "#5ea9d0",
+    }
+    ordered_locations = (
+        frame.sort_values("rank_order")["location_display"].drop_duplicates().tolist()
+        if "rank_order" in frame.columns
+        else frame["location_display"].drop_duplicates().tolist()
+    )
+
+    fig = go.Figure()
+    for period in period_order:
+        period_frame = frame[frame["periodo_dia"] == period]
+        fig.add_trace(
+            go.Bar(
+                x=period_frame["accidents"],
+                y=period_frame["location_display"],
+                orientation="h",
+                name=period,
+                marker=dict(color=period_colors[period]),
+                hovertemplate="%{y}<br>%{x:,} acidentes em %{fullData.name}<extra></extra>",
+            )
+        )
+
+    fig.update_layout(
+        barmode="stack",
+        height=360,
+        margin=dict(l=16, r=16, t=12, b=16),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family=BASE_FONT, color=FONT_COLOR),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0, font=dict(color=MUTED_COLOR)),
+    )
+    fig.update_xaxes(
+        title="Acidentes",
+        showgrid=True,
+        gridcolor=GRID_COLOR,
+        zeroline=False,
+        tickfont=dict(color=MUTED_COLOR),
+        title_font=dict(color=MUTED_COLOR),
+    )
+    fig.update_yaxes(
+        title="Rua / avenida / local",
+        showgrid=False,
+        zeroline=False,
+        tickfont=dict(color=MUTED_COLOR),
+        title_font=dict(color=MUTED_COLOR),
+        automargin=True,
+        categoryorder="array",
+        categoryarray=ordered_locations,
+        autorange="reversed",
+    )
+    return fig
+
+
 def scatter_severity(frame: pd.DataFrame, x_col: str, y_col: str) -> go.Figure:
     if frame.empty:
         return _empty_figure("Sem registros para o filtro selecionado")
