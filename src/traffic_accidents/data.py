@@ -238,6 +238,21 @@ def _prepare_accidents(frame: pd.DataFrame) -> pd.DataFrame:
 
     frame["location_reference"], frame["location_display"] = _build_location_reference(frame)
 
+    for column in [
+        "severity",
+        "state",
+        "city",
+        "accident_type",
+        "periodo_dia",
+        "time_period",
+        "day_name",
+        "location_reference",
+        "location_display",
+        "source_file",
+    ]:
+        if column in frame.columns:
+            frame[column] = frame[column].astype("category")
+
     return frame
 
 

@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 from dash import Dash, Input, Output, State, dash_table, dcc, html
+from flask_caching import Cache
 
 from .analysis import (
     build_kpis,
@@ -13,6 +14,7 @@ from .analysis import (
     by_severity,
     by_state,
     monthly_trend,
+    PERIOD_ORDER,
     street_period_distribution,
     street_period_insight,
     street_period_summary,
@@ -42,6 +44,7 @@ except Exception as exc:
     data = generate_demo_data(rows=20000)
 
 app = Dash(__name__, title="Central Analítica de Acidentes", assets_folder=str(PROJECT_ROOT / "assets"))
+cache = Cache(app.server, config={"CACHE_TYPE": "SimpleCache", "CACHE_DEFAULT_TIMEOUT": 90})
 
 DISPLAY_COLUMNS = [
     "occurred_at",
@@ -190,6 +193,27 @@ def _filter_data(
     return filtered
 
 
+@cache.memoize(timeout=90)
+def _cached_filter_data(
+    severity: str | None = None,
+    state: str | None = None,
+    city: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    km_start: float | None = None,
+    km_end: float | None = None,
+) -> pd.DataFrame:
+    return _filter_data(
+        severity=severity,
+        state=state,
+        city=city,
+        start_date=start_date,
+        end_date=end_date,
+        km_start=km_start,
+        km_end=km_end,
+    ).copy()
+
+
 def _search_table(frame: pd.DataFrame, search_value: str | None) -> pd.DataFrame:
     if not search_value:
         return frame
@@ -234,6 +258,132 @@ base_source_count = int(data["source_file"].nunique()) if "source_file" in data.
 base_state_count = int(data["state"].nunique()) if "state" in data.columns else 0
 state_options = [{"label": state, "value": state} for state in sorted(data["state"].dropna().unique())]
 city_options = [{"label": city, "value": city} for city in sorted(data.get("city", pd.Series(dtype=str)).dropna().unique())]
+
+
+@cache.memoize(timeout=90)
+def _cached_overview_payload(severity: str | None, state: str | None, city: str | None):
+    filtered = _cached_filter_data(severity=severity, state=state, city=city)
+    return (
+        _metric_cards(filtered),
+        monthly_line(monthly_trend(filtered)),
+        accident_type_bar(by_accident_type(filtered)),
+        hourly_heatmap(filtered),
+        severity_donut(by_severity(filtered)),
+        state_bar(by_state(filtered)),
+        city_bar(by_city(filtered)),
+        period_donut(by_period(filtered)),
+    )
+
+
+@cache.memoize(timeout=90)
+def _cached_explore_visual_payload(
+    severity: str | None,
+    state: str | None,
+    city: str | None,
+    start_date: str | None,
+    end_date: str | None,
+    km_start: float | None,
+    km_end: float | None,
+):
+    filtered = _cached_filter_data(
+        severity=severity,
+        state=state,
+        city=city,
+        start_date=start_date,
+        end_date=end_date,
+        km_start=km_start,
+        km_end=km_end,
+    )
+    street_ranking_frame, street_distribution_frame = _cached_explore_street_bundle(
+        severity,
+        state,
+        city,
+        start_date,
+        end_date,
+        km_start,
+        km_end,
+    )
+
+    return (
+        _metric_cards(filtered),
+        monthly_line(monthly_trend(filtered)),
+        accident_type_bar(by_accident_type(filtered)),
+        weekend_bars(weekend_comparison(filtered)),
+        street_ranking_bar(street_ranking_frame),
+        street_period_stacked_bar(street_distribution_frame),
+    )
+
+
+def _build_street_summary_payload(
+    street_ranking_frame: pd.DataFrame,
+    street_distribution_frame: pd.DataFrame,
+) -> tuple[str, list[dict[str, str]], list[dict[str, str]]]:
+    columns = [
+        {"name": "Rua/Avenida/Local", "id": "location_display"},
+        {"name": "Município", "id": "city"},
+        {"name": "UF", "id": "state"},
+        {"name": "Total de acidentes", "id": "accidents"},
+        {"name": "Período dominante", "id": "dominant_period"},
+        {"name": "Acidentes no período dominante", "id": "dominant_count"},
+        {"name": "Percentual do período dominante", "id": "dominant_share"},
+    ]
+    if street_ranking_frame.empty or street_distribution_frame.empty:
+        return INSUFFICIENT_STREET_DATA_MESSAGE, [], columns
+
+    ranking = street_ranking_frame.rename(columns={"accidents": "total_accidents"})
+    period_priority = {period: index for index, period in enumerate(PERIOD_ORDER)}
+    dominant = (
+        street_distribution_frame.assign(period_priority=lambda current: current["periodo_dia"].map(period_priority))
+        .sort_values(
+            ["location_reference", "city", "state", "accidents", "period_priority"],
+            ascending=[True, True, True, False, True],
+        )
+        .drop_duplicates(["location_reference", "city", "state"])
+        .rename(columns={"periodo_dia": "dominant_period", "accidents": "dominant_count"})
+    )
+    summary = ranking.merge(
+        dominant[["location_reference", "city", "state", "dominant_period", "dominant_count"]],
+        on=["location_reference", "city", "state"],
+        how="left",
+    )
+    summary["dominant_share"] = (summary["dominant_count"] / summary["total_accidents"]).fillna(0.0)
+    summary = summary.rename(columns={"total_accidents": "accidents"})
+
+    top = summary.iloc[0]
+    insight = (
+        f"A maior concentração ocorre em {top['location_display']}, com {_format_number(top['accidents'])} acidentes. "
+        f"O período predominante é {top['dominant_period']}, representando {_format_share_label(top['dominant_share'])} "
+        f"das ocorrências desse local."
+    )
+    street_table = summary[["location_display", "city", "state", "accidents", "dominant_period", "dominant_count", "dominant_share"]].copy()
+    street_table["accidents"] = street_table["accidents"].map(_format_number)
+    street_table["dominant_count"] = street_table["dominant_count"].fillna(0).astype(int).map(_format_number)
+    street_table["dominant_share"] = street_table["dominant_share"].fillna(0).map(_format_share_label)
+    return insight, street_table.to_dict("records"), columns
+
+
+@cache.memoize(timeout=90)
+def _cached_explore_street_bundle(
+    severity: str | None,
+    state: str | None,
+    city: str | None,
+    start_date: str | None,
+    end_date: str | None,
+    km_start: float | None,
+    km_end: float | None,
+):
+    filtered = _cached_filter_data(
+        severity=severity,
+        state=state,
+        city=city,
+        start_date=start_date,
+        end_date=end_date,
+        km_start=km_start,
+        km_end=km_end,
+    )
+    street_ranking_frame = street_ranking(filtered)
+    street_distribution_frame = street_period_distribution(filtered)
+    return street_ranking_frame, street_distribution_frame
 
 
 app.layout = html.Div(
@@ -669,17 +819,7 @@ def update_explore_city_options(state, current_city):
     Input("filter-city", "value"),
 )
 def update_overview(severity, state, city):
-    filtered = _filter_data(severity=severity, state=state, city=city)
-    return (
-        _metric_cards(filtered),
-        monthly_line(monthly_trend(filtered)),
-        accident_type_bar(by_accident_type(filtered)),
-        hourly_heatmap(filtered),
-        severity_donut(by_severity(filtered)),
-        state_bar(by_state(filtered)),
-        city_bar(by_city(filtered)),
-        period_donut(by_period(filtered)),
-    )
+    return _cached_overview_payload(severity, state, city)
 
 
 @app.callback(
@@ -689,9 +829,43 @@ def update_overview(severity, state, city):
     Output("explore-weekend", "figure"),
     Output("explore-street-ranking", "figure"),
     Output("explore-street-period", "figure"),
+    Input("explore-severity", "value"),
+    Input("explore-state", "value"),
+    Input("explore-city", "value"),
+    Input("explore-period", "start_date"),
+    Input("explore-period", "end_date"),
+    Input("explore-km-start", "value"),
+    Input("explore-km-end", "value"),
+)
+def update_exploration(severity, state, city, start_date, end_date, km_start, km_end):
+    return _cached_explore_visual_payload(severity, state, city, start_date, end_date, km_start, km_end)
+
+
+@app.callback(
     Output("street-insight", "children"),
     Output("table-street-summary", "data"),
     Output("table-street-summary", "columns"),
+    Input("explore-severity", "value"),
+    Input("explore-state", "value"),
+    Input("explore-city", "value"),
+    Input("explore-period", "start_date"),
+    Input("explore-period", "end_date"),
+    Input("explore-km-start", "value"),
+    Input("explore-km-end", "value"),
+)
+def update_exploration_street_summary(severity, state, city, start_date, end_date, km_start, km_end):
+    street_ranking_frame, street_distribution_frame = _cached_explore_street_bundle(
+        severity,
+        state,
+        city,
+        start_date,
+        end_date,
+        km_start,
+        km_end,
+    )
+    return _build_street_summary_payload(street_ranking_frame, street_distribution_frame)
+
+@app.callback(
     Output("table-explore", "data"),
     Output("table-explore", "columns"),
     Output("table-explore", "page_count"),
@@ -707,8 +881,8 @@ def update_overview(severity, state, city):
     Input("table-explore", "page_size"),
     Input("table-explore", "sort_by"),
 )
-def update_exploration(severity, state, city, start_date, end_date, km_start, km_end, search_value, page_current, page_size, sort_by):
-    filtered = _filter_data(
+def update_exploration_table(severity, state, city, start_date, end_date, km_start, km_end, search_value, page_current, page_size, sort_by):
+    filtered = _cached_filter_data(
         severity=severity,
         state=state,
         city=city,
@@ -726,55 +900,16 @@ def update_exploration(severity, state, city, start_date, end_date, km_start, km
             table_source = table_source.sort_values(column_id, ascending=ascending)
 
     available = [column for column in DISPLAY_COLUMNS if column in table_source.columns]
-    table_frame = _format_table_frame(table_source[available].copy())
     page_current = page_current or 0
     page_size = page_size or 15
     start = page_current * page_size
     end = start + page_size
-    page_frame = table_frame.iloc[start:end]
-    street_summary = street_period_summary(filtered)
-    if street_summary.empty:
-        street_summary_records = []
-        street_summary_columns = [
-            {"name": "Rua/Avenida/Local", "id": "location_display"},
-            {"name": "Município", "id": "city"},
-            {"name": "UF", "id": "state"},
-            {"name": "Total de acidentes", "id": "accidents"},
-            {"name": "Período dominante", "id": "dominant_period"},
-            {"name": "Acidentes no período dominante", "id": "dominant_count"},
-            {"name": "Percentual do período dominante", "id": "dominant_share"},
-        ]
-    else:
-        street_table = street_summary[
-            ["location_display", "city", "state", "accidents", "dominant_period", "dominant_count", "dominant_share"]
-        ].copy()
-        street_table["accidents"] = street_table["accidents"].map(_format_number)
-        street_table["dominant_count"] = street_table["dominant_count"].fillna(0).astype(int).map(_format_number)
-        street_table["dominant_share"] = street_table["dominant_share"].fillna(0).map(_format_share_label)
-        street_summary_records = street_table.to_dict("records")
-        street_summary_columns = [
-            {"name": "Rua/Avenida/Local", "id": "location_display"},
-            {"name": "Município", "id": "city"},
-            {"name": "UF", "id": "state"},
-            {"name": "Total de acidentes", "id": "accidents"},
-            {"name": "Período dominante", "id": "dominant_period"},
-            {"name": "Acidentes no período dominante", "id": "dominant_count"},
-            {"name": "Percentual do período dominante", "id": "dominant_share"},
-        ]
+    page_frame = _format_table_frame(table_source[available].iloc[start:end].copy())
 
     return (
-        _metric_cards(filtered),
-        monthly_line(monthly_trend(filtered)),
-        accident_type_bar(by_accident_type(filtered)),
-        weekend_bars(weekend_comparison(filtered)),
-        street_ranking_bar(street_ranking(filtered)),
-        street_period_stacked_bar(street_period_distribution(filtered)),
-        street_period_insight(filtered),
-        street_summary_records,
-        street_summary_columns,
         page_frame.to_dict("records"),
         [{"name": COLUMN_LABELS.get(column, column.replace("_", " ").title()), "id": column} for column in available],
-        max(1, (len(table_frame) + page_size - 1) // page_size),
+        max(1, (len(table_source) + page_size - 1) // page_size),
     )
 
 
@@ -791,7 +926,7 @@ def update_exploration(severity, state, city, start_date, end_date, km_start, km
     prevent_initial_call=True,
 )
 def download_filtered(_, severity, state, city, start_date, end_date, km_start, km_end):
-    filtered = _filter_data(
+    filtered = _cached_filter_data(
         severity=severity,
         state=state,
         city=city,

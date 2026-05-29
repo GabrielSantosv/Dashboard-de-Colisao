@@ -358,11 +358,58 @@ body::after {
 .toolbar--header .Select-clear,
 .toolbar--explore .Select-clear {
   color: #7a9db5 !important;
+  width: 24px !important;
+  height: 24px !important;
+  min-width: 24px !important;
+  min-height: 24px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 6px !important;
+  margin-left: 4px !important;
+  cursor: pointer !important;
 }
 
 .toolbar--header .Select-clear:hover,
 .toolbar--explore .Select-clear:hover {
   color: #c65444 !important;
+  background: rgba(57, 167, 201, 0.12) !important;
+}
+
+.toolbar--header .dash-dropdown-clear,
+.toolbar--explore .dash-dropdown-clear {
+  width: 24px !important;
+  height: 24px !important;
+  min-width: 24px !important;
+  min-height: 24px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 6px !important;
+  margin-left: 4px !important;
+  cursor: pointer !important;
+}
+
+.toolbar--header .dash-dropdown-clear:hover,
+.toolbar--explore .dash-dropdown-clear:hover {
+  background: rgba(57, 167, 201, 0.12) !important;
+}
+
+.dash-dropdown-clear {
+  width: 24px !important;
+  height: 24px !important;
+  min-width: 24px !important;
+  min-height: 24px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 6px !important;
+  margin-left: 4px !important;
+  cursor: pointer !important;
+}
+
+.dash-dropdown-clear:hover {
+  background: rgba(57, 167, 201, 0.12) !important;
 }
 
 /* 6 — Menu suspenso */
@@ -427,9 +474,37 @@ body::after {
   background: #091d2c !important;
 }
 
+.toolbar--explore .dash-datepicker,
+.toolbar--explore .dash-datepicker-input-wrapper {
+  width: 100%;
+  background: #091d2c !important;
+  border: 1px solid rgba(57, 167, 201, 0.3) !important;
+  border-radius: 8px !important;
+}
+
+.toolbar--explore .dash-datepicker-input-wrapper:hover,
+.toolbar--explore .dash-datepicker-input-wrapper:focus-within {
+  border-color: rgba(57, 167, 201, 0.65) !important;
+  box-shadow: 0 0 0 2px rgba(57, 167, 201, 0.18) !important;
+}
+
 .toolbar--explore .DateInput {
   background: #091d2c !important;
   border-radius: 6px;
+}
+
+.toolbar--explore .dash-datepicker-input {
+  width: 100%;
+  background: #091d2c !important;
+  color: #e8f0f7 !important;
+  font-family: var(--mono);
+  font-size: 13px;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.toolbar--explore .dash-datepicker-input::placeholder {
+  color: #7a9db5 !important;
 }
 
 .toolbar--explore .DateInput_input,
