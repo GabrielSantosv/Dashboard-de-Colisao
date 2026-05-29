@@ -6,3 +6,4 @@ scikit-learn>=1.5
 python-dateutil>=2.9
 basedosdados>=2.0
 Flask-Caching>=2.0
+pyarrow>=14.0

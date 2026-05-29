@@ -298,10 +298,51 @@ def _load_borough_reference(reference_dir: Path = REFERENCE_DIR) -> pd.DataFrame
     return reference
 
 
+PROCESSED_PATH = Path("data/processed/accidents.parquet")
+
+CATEGORICAL_COLUMNS = [
+    "severity", "state", "city", "accident_type",
+    "periodo_dia", "time_period", "day_name",
+    "location_reference", "location_display", "source_file",
+    "borough_group",
+]
+
+PERIOD_LABELS_ORDER = ["Madrugada", "Manhã", "Tarde", "Noite"]
+
+
+def _restore_categoricals(frame: pd.DataFrame) -> pd.DataFrame:
+    for col in CATEGORICAL_COLUMNS:
+        if col in frame.columns:
+            if col in ("periodo_dia", "time_period"):
+                frame[col] = pd.Categorical(
+                    frame[col],
+                    categories=PERIOD_LABELS_ORDER,
+                    ordered=True,
+                )
+            else:
+                frame[col] = frame[col].astype("category")
+    return frame
+
+
 def load_raw_accidents(raw_dir: Path = RAW_DIR) -> pd.DataFrame:
+    # ── 1. Tenta carregar parquet pré-processado (rápido: ~0.1s) ──────────────
+    if PROCESSED_PATH.exists():
+        try:
+            frame = pd.read_parquet(PROCESSED_PATH, engine="pyarrow")
+            frame = _restore_categoricals(frame)
+            print(f"[OK] Parquet carregado: {len(frame):,} registros em ~0.1s")
+            print("[INFO] Para reprocessar os dados brutos, delete data/processed/accidents.parquet")
+            return frame
+        except Exception as exc:
+            print(f"[AVISO] Falha ao ler parquet ({exc}), reprocessando CSVs...")
+
+    # ── 2. Fallback: processa os CSVs brutos (lento: ~14s) ───────────────────
+    print("[INFO] Parquet não encontrado — processando CSVs brutos...")
+    print("[DICA] Rode 'python scripts/preprocess.py' para acelerar o próximo start.")
     csv_files = sorted(raw_dir.glob("*.csv"))
     frames = _load_csv_files(csv_files)
     if not frames:
+        print("[AVISO] Nenhum CSV encontrado. Usando dados de demonstração.")
         cleaned = generate_demo_data()
     else:
         accidents = pd.concat(frames, ignore_index=True)
